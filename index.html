@@ -6,6 +6,7 @@
 <meta name="darkreader-lock">
 <title>Scripts WhatsApp — SDR AlbeLEAD</title>
 <script src="https://accounts.google.com/gsi/client" async="" defer=""></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
@@ -1498,23 +1499,20 @@
     <div class="login-title">Scripts WhatsApp · SDR</div>
     <div class="login-subtitle">AlbeLEAD — Faça login para acessar<br>suas mensagens e fases</div>
 
-    <button class="btn-google" onclick="signInWithGoogle()">
-      <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-        <path fill="none" d="M0 0h48v48H0z"></path>
-      </svg>
-      Entrar com Google
-    </button>
-
-    <div class="login-divider">ou</div>
-
-    <button class="btn-skip" onclick="skipLogin()">Acessar sem login</button>
+    <form id="login-form" style="width:100%; display:flex; flex-direction:column; gap:10px;" onsubmit="return handleEmailLogin(event)">
+      <input id="login-email" type="email" required placeholder="E-mail"
+        style="width:100%; padding:12px 14px; background:var(--card); border:1px solid var(--border); border-radius:10px; color:var(--text); font-size:14px; font-family:inherit; outline:none;">
+      <input id="login-password" type="password" required placeholder="Senha"
+        style="width:100%; padding:12px 14px; background:var(--card); border:1px solid var(--border); border-radius:10px; color:var(--text); font-size:14px; font-family:inherit; outline:none;">
+      <button type="submit" id="login-submit-btn"
+        style="width:100%; padding:13px 20px; background:var(--accent); color:#0a0a0a; border:none; border-radius:10px; font-size:14px; font-weight:700; font-family:inherit; cursor:pointer;">
+        Entrar
+      </button>
+      <div id="login-error" style="display:none; color:var(--danger); font-size:12px; text-align:center;"></div>
+    </form>
 
     <div class="login-note">
-      🔒 Seu login é usado apenas para identificação.<br>Nenhum dado é enviado a servidores externos.
+      🔒 Acesso restrito a e-mails autorizados.<br>Fale com o administrador se precisar de acesso.
     </div>
   </div>
 </div>
@@ -3848,89 +3846,83 @@ function exportHTML() {
   showToast('Arquivo exportado!');
 }
 
-// ── Google Auth ─────────────────────────────────────────────────────────────
-// CONFIGURE AQUI: substitua pelo seu Google Client ID
-// Obtenha em: https://console.cloud.google.com → APIs & Services → Credentials
-const GOOGLE_CLIENT_ID = '48509867214-mpcvqdj55tdj7vob8nfa0e3lv8mfl5gf.apps.googleusercontent.com';
+// ── Login exclusivo · Supabase Auth (e-mail/senha) ─────────────────────────
+// Só usuários já cadastrados manualmente no Supabase (Authentication > Users)
+// conseguem entrar. Não há cadastro público neste site — para liberar alguém
+// novo, crie o usuário direto no painel do Supabase.
+const SUPABASE_URL = 'https://trwbssjuisxizyxnjsos.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_NLtT85PdBuO4qgKe-G20hg_Fi-YNMet';
+
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 
-function initGoogleAuth() {
-  const saved = sessionStorage.getItem('sdr_user');
-  if (saved) {
-    try {
-      currentUser = JSON.parse(saved);
-      showApp(currentUser);
-      return;
-    } catch(e) {}
-  }
-  if (GOOGLE_CLIENT_ID !== 'SEU_CLIENT_ID_AQUI.apps.googleusercontent.com' && window.google) {
-    google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: handleGoogleCredential,
-      auto_select: false,
-    });
-  }
-}
-
-function handleGoogleCredential(response) {
-  try {
-    const payload = JSON.parse(atob(response.credential.split('.')[1]));
-    currentUser = {
-      name: payload.name,
-      email: payload.email,
-      picture: payload.picture,
-      provider: 'google'
-    };
-    sessionStorage.setItem('sdr_user', JSON.stringify(currentUser));
+async function initGoogleAuth() {
+  // Se já existe uma sessão válida do Supabase (ex: recarregou a página), reaproveita.
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (session && session.user) {
+    setCurrentUserFromSession(session);
     showApp(currentUser);
-  } catch(e) {
-    alert('Erro ao processar login. Tente novamente.');
-  }
-}
-
-function signInWithGoogle() {
-  if (GOOGLE_CLIENT_ID === 'SEU_CLIENT_ID_AQUI.apps.googleusercontent.com') {
-    if (confirm('⚠️ Client ID do Google não configurado.\n\nPara ativar o login real, edite a variável GOOGLE_CLIENT_ID no código.\n\nDeseja continuar sem login por enquanto?')) {
-      skipLogin();
-    }
     return;
   }
-  if (!window.google) { alert('Aguarde o Google carregar e tente novamente.'); return; }
-  google.accounts.id.prompt();
+  document.getElementById('login-screen').classList.remove('hidden');
 }
 
-function skipLogin() {
-  currentUser = { name: 'Convidado', email: '', picture: '', provider: 'skip' };
-  sessionStorage.setItem('sdr_user', JSON.stringify(currentUser));
+function setCurrentUserFromSession(session) {
+  currentUser = {
+    id: session.user.id,
+    email: session.user.email,
+    name: (session.user.email || '').split('@')[0],
+    provider: 'supabase'
+  };
+}
+
+async function handleEmailLogin(event) {
+  event.preventDefault();
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errorBox = document.getElementById('login-error');
+  const submitBtn = document.getElementById('login-submit-btn');
+  errorBox.style.display = 'none';
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Entrando...';
+
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Entrar';
+
+  if (error) {
+    errorBox.textContent = '🚫 E-mail ou senha inválidos, ou esse e-mail não tem acesso liberado.';
+    errorBox.style.display = 'block';
+    return false;
+  }
+
+  setCurrentUserFromSession(data.session);
   showApp(currentUser);
+  return false;
 }
 
 function showApp(user) {
   document.getElementById('login-screen').classList.add('hidden');
-  if (user && user.provider !== 'skip') {
+  if (user) {
     const badge = document.getElementById('user-badge');
     badge.style.display = 'flex';
-    document.getElementById('user-name').textContent = user.name.split(' ')[0];
-    if (user.picture) {
-      const img = document.getElementById('user-avatar');
-      img.src = user.picture;
-      img.style.display = 'block';
-      document.getElementById('user-avatar-placeholder').style.display = 'none';
-    } else {
-      document.getElementById('user-avatar-placeholder').textContent = user.name.charAt(0).toUpperCase();
-    }
+    document.getElementById('user-name').textContent = user.name;
+    document.getElementById('user-avatar-placeholder').textContent = user.name.charAt(0).toUpperCase();
+    document.getElementById('user-avatar-placeholder').style.display = 'flex';
+    const img = document.getElementById('user-avatar');
+    if (img) img.style.display = 'none';
   }
 }
 
-function doLogout() {
-  sessionStorage.removeItem('sdr_user');
+async function doLogout() {
+  await supabaseClient.auth.signOut();
   currentUser = null;
-  if (window.google && GOOGLE_CLIENT_ID !== 'SEU_CLIENT_ID_AQUI.apps.googleusercontent.com') {
-    google.accounts.id.disableAutoSelect();
-  }
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('user-badge').style.display = 'none';
+  document.getElementById('login-email').value = '';
+  document.getElementById('login-password').value = '';
 }
 
 // ── Configurações · Cor do site ────────────────────────────────────────────
